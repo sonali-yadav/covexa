@@ -4,6 +4,7 @@ from pathlib import Path
 
 import anthropic
 import os
+from core.exceptions import _call
 from dotenv import load_dotenv
 
 
@@ -52,14 +53,14 @@ def ask(messages, *, system=None, model=MODEL_FAST, max_tokens=1024) -> LLMResul
     if system:
         kwargs["system"] = system
     started = time.perf_counter()
-    return _to_result(client.messages.create(**kwargs), started=started)
+    return _to_result(_call(client.messages.create, **kwargs), started=started)
 
 
 def upload(path: str) -> str:
     p = Path(path)
     mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
     with p.open("rb") as f:
-        uploaded = client.beta.files.upload(file=(p.name, f, mime))
+        uploaded = _call(client.beta.files.upload, file=(p.name, f, mime))
     log.info("uploaded file=%s id=%s size=%d mime=%s", p.name, uploaded.id, uploaded.size_bytes, mime)
     return uploaded.id
 
@@ -69,11 +70,11 @@ def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens
     Ask a question about a file and return the result.
     """
     started = time.perf_counter()
-    response = client.beta.messages.create(
+    response = _call(client.beta.messages.create,
         model=model, max_tokens=max_tokens, messages= [
         {"role": "user", "content": [ # document should come before question recommended as a good practice
             {"type": "document", "source": {"type": "file", "file_id": file_id}},
             {"type": "text", "text": question},
         ]}
-    ],)
+    ], betas=[FILES_BETA])
     return _to_result(response, started=started)
