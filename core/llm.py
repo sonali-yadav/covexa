@@ -4,7 +4,7 @@ from pathlib import Path
 
 import anthropic
 import os
-from core.exceptions import _call
+from core.exceptions import LLMTemporaryError, _call, _classify
 from dotenv import load_dotenv
 
 
@@ -15,7 +15,7 @@ MODEL_FAST = os.getenv("MODEL_FAST", "claude-haiku-5-5")
 MODEL_SMART = os.getenv("MODEL_SMART", "claude-sonnet-5-5")
 FILES_BETA = os.getenv("FILES_BETA", "files-api-2025-04-14")
 
-client = anthropic.Anthropic()
+client = anthropic.Anthropic(max_retries=0) # using custom retry logic so turn off default retries
 
 
 @dataclass
@@ -78,3 +78,52 @@ def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens
         ]}
     ], betas=[FILES_BETA])
     return _to_result(response, started=started)
+
+
+def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=1024):
+    """Yields ("text", str) pieces, then exactly one ("done", dict)."""
+    kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    if system:
+        kwargs["system"] = system
+    
+    stream = _call(client.messages.create, **kwargs)
+    input_tokens, output_tokens, stop_reason = 0, 0, None
+    try:
+        for event in stream:
+            log.debug("event: %s", event.type)
+            if event.type == "message_start":
+                input_tokens = event.message.usage.input_tokens
+            elif event.type == "content_block_delta" and event.delta.type == "text_delta":
+                yield ("text", event.delta.text)
+            elif event.type == "message_delta":
+                stop_reason = event.message.stop_reason
+                output_tokens = event.message.usage.output_tokens
+            elif event.type == "message_stop":
+                yield ("done", {
+                    "stop_reason": stop_reason,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "truncated": stop_reason in ("max_tokens", "model_context_window_exceeded"),
+                })
+                return
+    except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+        raise _classify(e) from e  # mid-stream error, no silent retry
+    raise LLMTemporaryError("stream ended without message_stop event")
+    
+    
+    
+    started = time.perf_counter()
+    for event in _call(client.messages.stream, **kwargs):
+        if event.type == "response.output_text.delta":
+            yield ("text", event.delta)
+        elif event.type == "response.completed":
+            result = LLMResult(
+                text="",
+                stop_reason=event.stop_reason,
+                input_tokens=event.usage.input_tokens,
+                output_tokens=event.usage.output_tokens,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+            log.info("model=%s in=%d out=%d latency_ms=%.2f stop=%s", 
+                     event.model, result.input_tokens, result.output_tokens, result.latency_ms, result.stop_reason)
+            yield ("done", result)

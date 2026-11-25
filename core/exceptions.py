@@ -4,13 +4,38 @@
 # Each exception class inherits from a base exception class, allowing for organized error 
 # handling and categorization of different types of failures.
 
+import logging
+from time import time
+
 import anthropic
+import random
+
+log = logging.getLogger("covexa.llm")
 
 class LLMError(Exception):
     """Base class for every Covexa LLM failure."""
 
 class LLMTemporaryError(LLMError):
     """Worth retrying: rate limit, server error, overloaded, timeout, network."""
+    def __init__(self, message, *, status=None, retry_after=None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
+
+
+def _classify(e: Exception) -> LLMError:
+    """Classify and turn any SDK error into one of Covexa's three error types."""
+    if isinstance(e, anthropic.APIConnectionError):
+        return LLMTemporaryError(str(e))
+    if isinstance(e, anthropic.APIStatusError):
+        if e.status_code in RETRYABLE_STATUS:
+            ra = e.response.headers.get("retry-after")
+            return LLMTemporaryError(f"{e.status_code}: {str(e)}", status=e.status_code, 
+                                     retry_after=float(ra) if ra else None)
+        if e.status_code in (401, 403):
+            return LLMAuthError(f"{e.status_code}: {str(e)}", status=e.status_code)
+        return LLMRequestError(f"{e.status_code}: {str(e)}", status=e.status_code)
+    raise e  # if not api error, then a bug in our code so let it crash and be fixed.
 
 class LLMAuthError(LLMError):
     """Key or permission problem. Retrying won't help; alert whoever owns the key."""
@@ -21,17 +46,17 @@ class LLMRequestError(LLMError):
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504, 529}
 
 
-def _call(func, **kwargs):
+def _call(func, *, attempts=4, base=1.0, cap=20.0, **kwargs):
     """
     Call a function and handle exceptions, raising appropriate LLM exceptions.
     """
-    try:
-        return func(**kwargs)
-    except anthropic.APIConnectionError as e:  # network failure or timeout
-        raise LLMTemporaryError(str(e)) from e
-    except anthropic.APIStatusError as e:  # api answered with an error status code
-        if e.status_code in RETRYABLE_STATUS:
-            raise LLMTemporaryError(f"{e.status_code}: {str(e)}") from e
-        if e.status_code in (401, 403):
-            raise LLMAuthError(f"{e.status_code}: {str(e)}") from e
-        raise LLMRequestError(f"{e.status_code}: {str(e)}") from e
+    for attempt in range(1, attempts + 1):
+        try:
+            return func(**kwargs)
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+            err = _classify(e)
+            if isinstance(err, LLMTemporaryError) or attempt == attempts:
+                raise err from e
+            delay = err.retry_after or min(cap, base * 2 ** (attempt - 1)) * random.uniform(0.5, 1.5)
+            log.warning("attempt %d/%d failed (%s); retrying in %.1fs", attempt, attempts, err, delay)
+            time.sleep(delay)
