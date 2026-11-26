@@ -1,0 +1,16 @@
+<input id="q" size="60" placeholder="Ask about your policy"> <button onclick="go()">Ask</button>
+<p id="out"></p><p id="meta" style="color:gray"></p>
+<script>
+function go() {
+  out.textContent = ""; meta.textContent = "";
+  const es = new EventSource("/ask/stream?q=" + encodeURIComponent(q.value));
+  es.addEventListener("delta", e => out.textContent += JSON.parse(e.data));
+  es.addEventListener("done", e => {
+    const d = JSON.parse(e.data);
+    meta.textContent = (d.truncated ? "⚠ Answer was cut off. " : "") +
+                       `stop=${d.stop_reason} in=${d.input_tokens} out=${d.output_tokens}`;
+    es.close();
+  });
+  es.addEventListener("error", e => { if (e.data) meta.textContent = JSON.parse(e.data).message; es.close(); });
+}
+</script>

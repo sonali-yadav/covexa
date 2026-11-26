@@ -4,7 +4,7 @@ from pathlib import Path
 
 import anthropic
 import os
-from core.exceptions import LLMTemporaryError, _call, _classify
+from covexa.core.exceptions import LLMTemporaryError, _call, _classify
 from dotenv import load_dotenv
 
 
@@ -82,7 +82,7 @@ def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens
 
 def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=1024):
     """Yields ("text", str) pieces, then exactly one ("done", dict)."""
-    kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens,  "stream": True}
     if system:
         kwargs["system"] = system
     
@@ -96,8 +96,8 @@ def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=1024):
             elif event.type == "content_block_delta" and event.delta.type == "text_delta":
                 yield ("text", event.delta.text)
             elif event.type == "message_delta":
-                stop_reason = event.message.stop_reason
-                output_tokens = event.message.usage.output_tokens
+                stop_reason = event.delta.stop_reason
+                output_tokens = event.usage.output_tokens
             elif event.type == "message_stop":
                 yield ("done", {
                     "stop_reason": stop_reason,
