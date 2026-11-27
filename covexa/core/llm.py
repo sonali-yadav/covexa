@@ -45,7 +45,7 @@ def _to_result(response, started: float) -> LLMResult:
     return result
 
 
-def ask(messages, *, system=None, model=MODEL_FAST, max_tokens=1024) -> LLMResult:
+def ask(messages, *, system=None, model=MODEL_FAST, max_tokens=int(os.getenv("MAX_TOKENS", "1024"))) -> LLMResult:
     """
     Ask a question to the LLM and return the result.
     """
@@ -65,7 +65,7 @@ def upload(path: str) -> str:
     return uploaded.id
 
 
-def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens=1024) -> LLMResult:
+def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens=int(os.getenv("MAX_TOKENS", "1024"))) -> LLMResult:
     """
     Ask a question about a file and return the result.
     """
@@ -80,7 +80,7 @@ def ask_about_file(file_id: str, question: str, * , model=MODEL_FAST, max_tokens
     return _to_result(response, started=started)
 
 
-def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=1024):
+def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=int(os.getenv("MAX_TOKENS", "1024"))):
     """Yields ("text", str) pieces, then exactly one ("done", dict)."""
     kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens,  "stream": True}
     if system:
@@ -109,21 +109,3 @@ def stream_answer(messages, *, system=None, model=MODEL_FAST, max_tokens=1024):
     except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
         raise _classify(e) from e  # mid-stream error, no silent retry
     raise LLMTemporaryError("stream ended without message_stop event")
-    
-    
-    
-    started = time.perf_counter()
-    for event in _call(client.messages.stream, **kwargs):
-        if event.type == "response.output_text.delta":
-            yield ("text", event.delta)
-        elif event.type == "response.completed":
-            result = LLMResult(
-                text="",
-                stop_reason=event.stop_reason,
-                input_tokens=event.usage.input_tokens,
-                output_tokens=event.usage.output_tokens,
-                latency_ms=(time.perf_counter() - started) * 1000,
-            )
-            log.info("model=%s in=%d out=%d latency_ms=%.2f stop=%s", 
-                     event.model, result.input_tokens, result.output_tokens, result.latency_ms, result.stop_reason)
-            yield ("done", result)

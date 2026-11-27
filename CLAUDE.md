@@ -47,3 +47,7 @@ python samples/make_policy.py     # regenerates samples/motor_policy.pdf (fictio
 - Pick models with `os.getenv(...)` and a default instead of hardcoding them.
 - Scripts print `stop_reason` and `usage` next to the response text. Keep doing this so it's clear when a reply was truncated (`max_tokens`) and what it cost.
 - Django settings come from environment variables via `.env`. Don't hardcode secrets or hosts in `config/settings.py`.
+
+## Environment
+- covexa is installed editable (`pip install -e .`). Import as `from covexa.core...` from anywhere; never use sys.path hacks.
+

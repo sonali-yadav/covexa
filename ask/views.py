@@ -1,5 +1,6 @@
 import json
 import os
+from dotenv import load_dotenv
 from dataclasses import asdict
 from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import render
@@ -9,6 +10,9 @@ from covexa.core.grounded import answer_from_policy
 
 
 SYSTEM = "You are Covexa, a helpful insurance assistant. Be concise."
+MAX_QUESTION_CHARS = 500
+
+load_dotenv()
 
 
 def page(request):
@@ -22,7 +26,16 @@ def sse(event: str, data) -> str:
 
 def policy_answer(request):
     q = request.GET.get("q", "").strip()
-    ans = answer_from_policy(os.environ["COVEXA_SAMPLE_POLICY_FILE_ID"], q, title="Motor policy CVX-2026-0042")
+    if not q:
+        return JsonResponse({"error": "Please type a question"}, status=400)
+    if len(q) > MAX_QUESTION_CHARS:
+        return JsonResponse({"error": f"Questions must be under {MAX_QUESTION_CHARS} characters"}, status=400)
+    try:
+        ans = answer_from_policy(os.environ["COVEXA_SAMPLE_POLICY_FILE_ID"], q, title="Motor policy CVX-2026-0042")
+    except LLMTemporaryError:
+        return JsonResponse({"error": "Busy right now, please try again."}, status=503)
+    except LLMError:
+        return JsonResponse({"error": "Something went wrong on our side."}, status=500)
     return JsonResponse(asdict(ans))
 
 
@@ -31,7 +44,7 @@ def stream(request):
 
     def events():
         try:
-            for kind, payload in stream_answer([{"role": "user", "content": question}], system=SYSTEM, max_tokens=400):
+            for kind, payload in stream_answer([{"role": "user", "content": question}], system=SYSTEM, max_tokens=int(os.getenv("MAX_TOKENS", "1024"))):
                 yield sse("delta" if kind == "text" else "done", payload)
         except LLMTemporaryError as e:
             yield sse("error", {"message": "Busy right now, please try again.", "retryable": True})

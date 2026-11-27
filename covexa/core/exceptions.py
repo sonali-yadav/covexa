@@ -5,7 +5,7 @@
 # handling and categorization of different types of failures.
 
 import logging
-from time import time
+import time as tm
 
 import anthropic
 import random
@@ -39,9 +39,17 @@ def _classify(e: Exception) -> LLMError:
 
 class LLMAuthError(LLMError):
     """Key or permission problem. Retrying won't help; alert whoever owns the key."""
+    def __init__(self, message, *, status=None, retry_after=None):
+            super().__init__(message)
+            self.status = status
+            self.retry_after = retry_after
 
 class LLMRequestError(LLMError):
     """Our request is wrong (bad model, bad shape, too large). It's a bug, never retry."""
+    def __init__(self, message, *, status=None, retry_after=None):
+            super().__init__(message)
+            self.status = status
+            self.retry_after = retry_after
 
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504, 529}
 
@@ -54,9 +62,9 @@ def _call(func, *, attempts=4, base=1.0, cap=20.0, **kwargs):
         try:
             return func(**kwargs)
         except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
-            err = _classify(e)
-            if isinstance(err, LLMTemporaryError) or attempt == attempts:
+            err = _classify(e)  # LLMTemporaryError / LLMAuthError / LLMRequestError
+            if not isinstance(err, LLMTemporaryError) or attempt == attempts:
                 raise err from e
-            delay = err.retry_after or min(cap, base * 2 ** (attempt - 1)) * random.uniform(0.5, 1.5)
+            delay = err.retry_after or min(cap, base * 2 ** (attempt - 1) * random.uniform(0.5, 1.5))
             log.warning("attempt %d/%d failed (%s); retrying in %.1fs", attempt, attempts, err, delay)
-            time.sleep(delay)
+            tm.sleep(delay)
