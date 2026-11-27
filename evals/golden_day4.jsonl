@@ -1,0 +1,8 @@
+{"q": "What is the deductible?", "expect": "answered"}
+{"q": "Is zero depreciation cover available?", "expect": "answered"}
+{"q": "How many days do I have to file a claim?", "expect": "answered"}
+{"q": "What is my policy number?", "expect": "answered"}
+{"q": "What does the policy exclude?", "expect": "answered"}
+{"q": "Does the policy cover flood damage?", "expect": "not_found"}
+{"q": "Does the policy protect against heart attack?", "expect": "not_found"}
+{"q": "Is international travel insurance included?", "expect": "not_found"}
